@@ -1,0 +1,62 @@
+#!/bin/bash
+# Discover Raspberry Pis on the local network.
+# Combines three strategies — none is exhaustive, all together usually find it.
+set -euo pipefail
+
+# Raspberry Pi Foundation / Raspberry Pi Ltd MAC OUI prefixes.
+PI_OUIS='b8:27:eb|dc:a6:32|e4:5f:01|28:cd:c1|d8:3a:dd|2c:cf:67'
+
+echo "[1] ARP cache — devices with Raspberry Pi MAC prefixes"
+arp_out=$(arp -an 2>/dev/null | awk '
+  {
+    ip = ""; mac = "";
+    for (i=1;i<=NF;i++) {
+      if ($i ~ /^\([0-9.]+\)$/) { ip=$i; gsub(/[()]/,"",ip) }
+      if ($i ~ /^[0-9a-fA-F]+(:[0-9a-fA-F]+){5}$/) mac=$i
+    }
+    if (ip && mac) print ip, mac
+  }' | grep -i -E "($PI_OUIS)" || true)
+if [[ -n "$arp_out" ]]; then
+  printf "%s\n" "$arp_out" | awk '{printf "    %-16s  %s\n", $1, $2}'
+else
+  echo "    (none — ARP cache may be cold; ping your subnet first to populate it)"
+fi
+
+echo
+echo "[2] mDNS — hosts advertising _ssh._tcp"
+if command -v dns-sd >/dev/null 2>&1; then
+  TMP=$(mktemp); trap "rm -f $TMP" EXIT
+  dns-sd -B _ssh._tcp . > "$TMP" 2>&1 &
+  pid=$!
+  sleep 3
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  results=$(awk '/Add/ && $NF != "" {print "    " $NF ".local"}' "$TMP" | sort -u)
+  [[ -n "$results" ]] && echo "$results" || echo "    (none seen in 3 seconds)"
+elif command -v avahi-browse >/dev/null 2>&1; then
+  results=$(avahi-browse -rt _ssh._tcp 2>/dev/null \
+            | awk -F";" '$1=="=" {print "    " $4 ".local"}' | sort -u)
+  [[ -n "$results" ]] && echo "$results" || echo "    (none seen)"
+else
+  echo "    (no mDNS browse tool — install avahi-utils on Linux)"
+fi
+
+echo
+echo "[3] Probe — common Pi hostnames"
+HOSTS=(raspberrypi.local pi.local pi5.local pi4.local pi3.local raspi.local)
+any=0
+for h in "${HOSTS[@]}"; do
+  if ping -c1 -W1000 -t1 "$h" >/dev/null 2>&1 || ping -c1 -W1 "$h" >/dev/null 2>&1; then
+    printf "    %s\n" "$h"
+    any=1
+  fi
+done
+[[ "$any" -eq 0 ]] && echo "    (none of the common names resolved)"
+
+cat <<EOF
+
+Usage hint:
+    PI_HOST=user@<one of the hosts above> bin/snap
+    or
+    bin/snap --host user@host.local
+EOF

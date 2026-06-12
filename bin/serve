@@ -1,0 +1,53 @@
+#!/bin/bash
+# Start the MJPEG streaming server on a remote Pi (foreground; Ctrl-C stops it)
+# and open it in the local browser.
+# Usage: serve [--host USER@HOST] [--port N] [server.py args...]
+set -euo pipefail
+
+HOST="${PI_HOST:-}"
+DEST="${PI_DEST:-pi_usb_camera}"
+PORT=8080
+
+# Extract --host / --dest / --port; pass the rest through to server.py.
+PASSTHROUGH=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --host)   HOST="$2"; shift 2 ;;
+    --host=*) HOST="${1#--host=}"; shift ;;
+    --dest)   DEST="$2"; shift 2 ;;
+    --dest=*) DEST="${1#--dest=}"; shift ;;
+    --port)   PORT="$2"; PASSTHROUGH+=(--port "$2"); shift 2 ;;
+    --port=*) PORT="${1#--port=}"; PASSTHROUGH+=("$1"); shift ;;
+    -h|--help)
+      cat <<EOF
+Usage: $(basename "$0") [--host USER@HOST] [--dest DIR] [--port N] [server args...]
+
+Run the MJPEG streaming server on the remote Pi and open the browser locally.
+Ctrl-C kills the server (the SSH session carries the signal).
+
+  --host         SSH target. Default: \$PI_HOST.
+  --dest         Install directory on the Pi. Default: \$PI_DEST or pi_usb_camera.
+  --port         Port to serve on. Default: 8080.
+  --resolution   e.g. 1920x1080 (passed through to server.py)
+  --framerate    e.g. 25       (passed through to server.py)
+EOF
+      exit 0 ;;
+    *) PASSTHROUGH+=("$1"); shift ;;
+  esac
+done
+
+if [[ -z "$HOST" ]]; then
+  echo "error: no host. set PI_HOST or pass --host USER@HOST" >&2
+  exit 2
+fi
+
+# Strip any "user@" prefix for the URL the browser will use.
+HOSTNAME_ONLY="${HOST#*@}"
+URL="http://$HOSTNAME_ONLY:$PORT/"
+echo "→ starting server on $HOST  ($URL)"
+
+# Open the browser shortly after the server boots.
+( sleep 1.5 && [[ "$(uname)" == "Darwin" ]] && open "$URL" || true ) &
+
+# -t allocates a TTY so Ctrl-C propagates to ffmpeg/python on the Pi.
+exec ssh -t "$HOST" "python3 $DEST/server.py ${PASSTHROUGH[*]:-}"

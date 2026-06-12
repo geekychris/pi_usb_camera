@@ -1,0 +1,48 @@
+#!/bin/bash
+# Record video on a remote Pi and pull the MP4 back to this machine.
+# Usage: rec [--host USER@HOST] [seconds] [output.mp4] [WIDTHxHEIGHT]
+set -euo pipefail
+
+HOST="${PI_HOST:-}"
+DEST="${PI_DEST:-pi_usb_camera}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --host)   HOST="$2"; shift 2 ;;
+    --host=*) HOST="${1#--host=}"; shift ;;
+    --dest)   DEST="$2"; shift 2 ;;
+    --dest=*) DEST="${1#--dest=}"; shift ;;
+    -h|--help)
+      cat <<EOF
+Usage: $(basename "$0") [--host USER@HOST] [--dest DIR] [seconds] [output.mp4] [WxH]
+
+Record an H.264 MP4 from the camera on the remote Pi and copy it locally.
+
+  --host    SSH target. Default: \$PI_HOST.
+  --dest    Install directory on the Pi. Default: \$PI_DEST or pi_usb_camera.
+  seconds   Duration. Default: 10.
+  output    Local output path. Default: ./rec-<date>.mp4.
+  WxH       Capture resolution. Default: 1920x1080.
+EOF
+      exit 0 ;;
+    --) shift; break ;;
+    -*) echo "unknown flag: $1" >&2; exit 2 ;;
+    *)  break ;;
+  esac
+done
+
+if [[ -z "$HOST" ]]; then
+  echo "error: no host. set PI_HOST or pass --host USER@HOST" >&2
+  exit 2
+fi
+
+SECS="${1:-10}"
+LOCAL_OUT="${2:-rec-$(date +%Y%m%d-%H%M%S).mp4}"
+RES="${3:-1920x1080}"
+REMOTE_OUT="$DEST/captures/$(basename "$LOCAL_OUT")"
+
+echo "→ recording ${SECS}s on $HOST"
+ssh "$HOST" "$DEST/record.sh '$REMOTE_OUT' '$SECS' '$RES'" >/dev/null
+scp -q "$HOST:$REMOTE_OUT" "$LOCAL_OUT"
+echo "$LOCAL_OUT"
+[[ "$(uname)" == "Darwin" ]] && open "$LOCAL_OUT" || true

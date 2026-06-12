@@ -1,0 +1,46 @@
+#!/bin/bash
+# Take a snapshot on a remote Pi and pull it back to this machine.
+# Usage: snap [--host USER@HOST] [output.jpg] [WIDTHxHEIGHT]
+set -euo pipefail
+
+HOST="${PI_HOST:-}"
+DEST="${PI_DEST:-pi_usb_camera}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --host)   HOST="$2"; shift 2 ;;
+    --host=*) HOST="${1#--host=}"; shift ;;
+    --dest)   DEST="$2"; shift 2 ;;
+    --dest=*) DEST="${1#--dest=}"; shift ;;
+    -h|--help)
+      cat <<EOF
+Usage: $(basename "$0") [--host USER@HOST] [--dest DIR] [output.jpg] [WxH]
+
+Take one JPEG from the camera on the remote Pi and copy it locally.
+
+  --host    SSH target. Default: \$PI_HOST.
+  --dest    Install directory on the Pi. Default: \$PI_DEST or pi_usb_camera.
+  output    Local output path. Default: ./snap-<date>.jpg.
+  WxH       Capture resolution. Default: 1920x1080.
+EOF
+      exit 0 ;;
+    --) shift; break ;;
+    -*) echo "unknown flag: $1" >&2; exit 2 ;;
+    *)  break ;;
+  esac
+done
+
+if [[ -z "$HOST" ]]; then
+  echo "error: no host. set PI_HOST or pass --host USER@HOST" >&2
+  echo "       \`bin/find\` lists Pis on your network." >&2
+  exit 2
+fi
+
+LOCAL_OUT="${1:-snap-$(date +%Y%m%d-%H%M%S).jpg}"
+RES="${2:-1920x1080}"
+REMOTE_OUT="$DEST/captures/$(basename "$LOCAL_OUT")"
+
+ssh "$HOST" "$DEST/snapshot.sh '$REMOTE_OUT' '$RES'" >/dev/null
+scp -q "$HOST:$REMOTE_OUT" "$LOCAL_OUT"
+echo "$LOCAL_OUT"
+[[ "$(uname)" == "Darwin" ]] && open "$LOCAL_OUT" || true
