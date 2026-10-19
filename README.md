@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Pi Usb Camera logo" width="180">
+</p>
+
 # pi_usb_camera
 
 Snapshot, video record, and live-stream from a USB webcam plugged into a
